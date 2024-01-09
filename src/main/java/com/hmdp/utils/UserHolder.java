@@ -3,6 +3,9 @@ package com.hmdp.utils;
 
 import com.hmdp.dto.UserDTO;
 
+/**
+ * 存储用户登录信息
+ */
 public class UserHolder {
     private static final ThreadLocal<UserDTO> tl = new ThreadLocal<>();
 
