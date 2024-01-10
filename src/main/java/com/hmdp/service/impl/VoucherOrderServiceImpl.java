@@ -1,26 +1,23 @@
 package com.hmdp.service.impl;
 
 import com.hmdp.dto.Result;
-import com.hmdp.entity.SeckillVoucher;
+import com.hmdp.dto.UserDTO;
 import com.hmdp.entity.VoucherOrder;
 import com.hmdp.mapper.VoucherOrderMapper;
 import com.hmdp.service.ISeckillVoucherService;
 import com.hmdp.service.IVoucherOrderService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import com.hmdp.utils.RedisConstants;
 import com.hmdp.utils.RedisIdWorker;
-import com.hmdp.utils.SimpleRedisLock;
 import com.hmdp.utils.UserHolder;
-import io.netty.util.Timeout;
-import org.springframework.aop.framework.AopContext;
-import org.springframework.beans.factory.annotation.Autowired;
+import org.redisson.api.RedissonClient;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import javax.annotation.Resource;
-import java.time.LocalDateTime;
-import java.util.concurrent.TimeUnit;
+import java.util.Collections;
 
 /**
  * <p>
@@ -41,7 +38,51 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
     @Resource
     private StringRedisTemplate stringRedisTemplate;
+    @Resource
+    private RedissonClient redissonClient;
 
+    private static final DefaultRedisScript<Long> SECKILL_SCRIPT;
+    static {
+        SECKILL_SCRIPT = new DefaultRedisScript<>();
+        SECKILL_SCRIPT.setLocation(new ClassPathResource("seckill.lua"));
+        SECKILL_SCRIPT.setResultType(Long.class);
+    }
+
+    @Override
+    public Result seckillVoucher(Long voucherId) {
+        // 获取用户
+        Long userId = UserHolder.getUser().getId();
+        // 1.执行lua脚本
+        Long result = stringRedisTemplate.execute(SECKILL_SCRIPT,
+                Collections.emptyList(),
+                voucherId.toString(), userId.toString()
+        );
+
+        // 2.判断结果是否为0
+        int r = result.intValue();
+        if (r != 0) {
+            // 2.1 不为0代表没有购买资格
+            return Result.fail(r == 1 ? "库存不足" : "不能重复下单");
+        }
+        // 2.2 为0代表有购买资格，把下单信息放到voucherOrder对象中并保存到阻塞队列
+        VoucherOrder voucherOrder = new VoucherOrder();
+        long orderId = redisIdWorker.nextId("order");
+        voucherOrder.setId(orderId);
+        voucherOrder.setUserId(userId);
+        voucherOrder.setVoucherId(voucherId);
+        //  放入到阻塞队列
+
+
+
+
+        // 3. 返回订单id
+        return Result.ok(orderId);
+
+    }
+
+
+
+    /*
     @Override
     public Result seckillVoucher(Long voucherId) {
         // 1.查询优惠券
@@ -60,13 +101,14 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         if (voucher.getStock() < 1) {
             return Result.fail("库存不足！");
         }
-
         Long userId = UserHolder.getUser().getId();
-
         // 创建锁对象
-        SimpleRedisLock lock = new SimpleRedisLock("order:" + userId, stringRedisTemplate);
-        // 获取锁
-        boolean isLock = lock.tryLock(5);
+        // SimpleRedisLock lock = new SimpleRedisLock("order:" + userId, stringRedisTemplate);
+        RLock lock = redissonClient.getLock("lock:order:" + userId);
+
+
+        // 获取锁，失败不等待，选择无参
+        boolean isLock = lock.tryLock();
         // 判断是否获取锁成功
         if (!isLock){
             // 获取锁失败，返回错误或重试（对于下订单业务，应该返回错误，不应该重试）
@@ -90,8 +132,6 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         // 5.一人一单
         Long userId = UserHolder.getUser().getId();
 
-
-
         // 5.1查询订单
         int count = query().eq("user_id", userId).eq("voucher_id", voucherId).count();
         // 5.2判断是否存在
@@ -110,8 +150,6 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
             // 扣减失败
             return Result.fail("库存不足！");
         }
-
-
         // 7.创建订单
         VoucherOrder voucherOrder = new VoucherOrder();
         // 7.1订单id
@@ -127,7 +165,6 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
 
         // 9.返回订单id
         return Result.ok(orderId);
-
-    }
+    }*/
 
 }

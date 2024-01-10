@@ -37,7 +37,6 @@ public class ShopTypeServiceImpl extends ServiceImpl<ShopTypeMapper, ShopType> i
         // 2.查到 将列表json转为列表返回
         if (shopTypeListJson != null){
             List<ShopType> shopTypes = JSONUtil.toList(shopTypeListJson, ShopType.class);
-            log.error("没有去查询数据库，直接从Redis查到数据{}", shopTypes);
             return Result.ok(shopTypes);
         }
 
@@ -52,8 +51,6 @@ public class ShopTypeServiceImpl extends ServiceImpl<ShopTypeMapper, ShopType> i
         // 5.数据库中有,将其转为json字符串并添加到redis缓存中
         String shopTypeJsonCache = JSONUtil.toJsonStr(shopTypes);
         stringRedisTemplate.opsForValue().set(shopTypeCacheKey, shopTypeJsonCache);
-        log.error("查了数据库，并添加到redis中的店铺类型有:{}", shopTypeJsonCache);
-
 
         // 6.返回店铺信息
         return Result.ok(shopTypes);
